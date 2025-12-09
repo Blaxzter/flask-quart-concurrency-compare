@@ -1,0 +1,28 @@
+# Production Quart Server with Hypercorn (ASGI)
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY servers/requirements-quart.txt .
+RUN pip install --no-cache-dir -r requirements-quart.txt
+
+# Copy application
+COPY servers/quart_comparison_server.py .
+
+# Expose port
+EXPOSE 8003
+
+# Run with Hypercorn (production ASGI server)
+# - Workers: 4 (adjust based on CPU cores)
+# - Uses asyncio for true async concurrency
+# - Can handle many more concurrent connections than Gunicorn
+CMD ["hypercorn", \
+     "--bind", "0.0.0.0:8003", \
+     "--workers", "4", \
+     "--worker-class", "asyncio", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "--log-level", "info", \
+     "quart_comparison_server:app"]
+

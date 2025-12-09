@@ -1,0 +1,6 @@
+# Quart server with production ASGI server
+quart==0.19.6
+flask==3.0.3
+hypercorn==0.17.3
+aiohttp==3.10.10
+

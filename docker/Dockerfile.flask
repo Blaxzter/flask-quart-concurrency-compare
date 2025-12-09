@@ -1,0 +1,28 @@
+# Production Flask Server with Gunicorn (WSGI)
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY servers/requirements-flask.txt .
+RUN pip install --no-cache-dir -r requirements-flask.txt
+
+# Copy application
+COPY servers/flask_comparison_server.py .
+
+# Expose port
+EXPOSE 8002
+
+# Run with Gunicorn (production WSGI server)
+# - Workers: 4 (adjust based on CPU cores)
+# - Threads: 2 per worker (allows some concurrency within each worker)
+# - Timeout: 120s (for slow IO operations)
+CMD ["gunicorn", \
+     "--bind", "0.0.0.0:8002", \
+     "--workers", "4", \
+     "--threads", "2", \
+     "--timeout", "120", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "--log-level", "info", \
+     "flask_comparison_server:app"]

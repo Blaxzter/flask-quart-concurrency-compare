@@ -1,0 +1,98 @@
+services:
+  # FastAPI test server (simulates slow IO operations like LLM calls)
+  fastapi-server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.fastapi
+    container_name: io-benchmark-fastapi
+    ports:
+      - "8001:8001"
+    networks:
+      - benchmark-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Flask server with Gunicorn (WSGI - synchronous)
+  flask-server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.flask
+    container_name: io-benchmark-flask
+    ports:
+      - "8002:8002"
+    networks:
+      - benchmark-network
+    environment:
+      - FASTAPI_BASE_URL=http://fastapi-server:8001
+    depends_on:
+      fastapi-server:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Quart server with Hypercorn (ASGI - asynchronous)
+  quart-server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.quart
+    container_name: io-benchmark-quart
+    ports:
+      - "8003:8003"
+    networks:
+      - benchmark-network
+    environment:
+      - FASTAPI_BASE_URL=http://fastapi-server:8001
+    depends_on:
+      fastapi-server:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+networks:
+  benchmark-network:
+    driver: bridge
+# Usage:
+# Build and start all services:
+#   docker-compose up --build
+#
+# Run in background:
+#   docker-compose up -d
+#
+# View logs:
+#   docker-compose logs -f
+#
+# Stop all services:
+#   docker-compose down
+#
+# Run benchmark:
+#   python benchmarks/benchmark_docker.py

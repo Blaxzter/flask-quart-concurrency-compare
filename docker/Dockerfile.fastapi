@@ -1,0 +1,24 @@
+# Production FastAPI Test Server with Uvicorn (ASGI)
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY servers/requirements-fastapi.txt .
+RUN pip install --no-cache-dir -r requirements-fastapi.txt
+
+# Copy application
+COPY servers/fastapi_server.py .
+
+# Expose port
+EXPOSE 8001
+
+# Run with Uvicorn (production ASGI server)
+# - Workers: 2 (fewer workers since this is just a test server)
+# - Uses asyncio for async concurrency
+CMD ["uvicorn", \
+     "fastapi_server:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8001", \
+     "--workers", "2", \
+     "--log-level", "info"]

@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test files
+benchmark.py
+benchmark_docker.py
+quick_test.py
+
+# Documentation (not needed in containers)
+*.md
+Makefile
+
+# Scripts (not needed in containers)
+start_servers.sh
+start_servers.bat
+docker-commands.sh
+docker-commands.bat
+
+# pyproject.toml (using requirements-*.txt in containers)
+pyproject.toml
+__init__.py
+

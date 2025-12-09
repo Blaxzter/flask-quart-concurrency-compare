@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test files
+benchmarks/
+scripts/
+
+# Documentation (not needed in containers)
+docs/
+*.md
+
+# pyproject.toml (using requirements-*.txt in containers)
+pyproject.toml
+__init__.py
+
