@@ -19,7 +19,7 @@ EXPOSE 8002
 # - Timeout: 120s (for slow IO operations)
 CMD ["gunicorn", \
      "--bind", "0.0.0.0:8002", \
-     "--workers", "4", \
+     "--workers", "1", \
      "--threads", "2", \
      "--timeout", "120", \
      "--access-logfile", "-", \

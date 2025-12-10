@@ -17,12 +17,149 @@ app.config["PROVIDE_AUTOMATIC_OPTIONS"] = True
 # Configuration
 FASTAPI_BASE_URL = "http://fastapi-server:8001"
 
+concurrency_gate = asyncio.Event()
+concurrency_gate.clear()
+concurrency_lock = asyncio.Lock()
+waiting_requests = 0
+release_round = 1
+
 
 @app.route("/")
 async def root():
     """Health check"""
     return jsonify(
         {"status": "ok", "message": "Quart Comparison Server", "type": "async"}
+    )
+
+
+def _parse_bool_arg(value: str | None, default: bool) -> bool:
+    if value is None:
+        return default
+    return value.lower() in {"1", "true", "t", "yes", "y", "on"}
+
+
+@app.route("/slow-io")
+async def slow_io_endpoint():
+    """Async sleep to mirror FastAPI slow-io"""
+    try:
+        delay = float(request.args.get("delay", 1.0))
+    except ValueError:
+        return jsonify({"error": "delay must be a number"}), 400
+
+    if delay < 0.1 or delay > 10.0:
+        return jsonify({"error": "delay must be between 0.1 and 10.0"}), 400
+
+    request_id = request.args.get("request_id")
+    await asyncio.sleep(delay)
+
+    return jsonify(
+        {
+            "message": f"IO operation completed after {delay} seconds",
+            "delay": delay,
+            "timestamp": time.time(),
+            "request_id": request_id,
+        }
+    )
+
+
+@app.route("/slow-io-sync")
+async def slow_io_sync_endpoint():
+    """Run blocking sleep in a worker thread to mirror FastAPI sync endpoint"""
+    try:
+        delay = float(request.args.get("delay", 1.0))
+    except ValueError:
+        return jsonify({"error": "delay must be a number"}), 400
+
+    if delay < 0.1 or delay > 10.0:
+        return jsonify({"error": "delay must be between 0.1 and 10.0"}), 400
+
+    request_id = request.args.get("request_id")
+    await asyncio.to_thread(time.sleep, delay)
+
+    return jsonify(
+        {
+            "message": f"Sync IO operation completed after {delay} seconds",
+            "delay": delay,
+            "timestamp": time.time(),
+            "request_id": request_id,
+        }
+    )
+
+
+@app.route("/concurrency/block")
+async def concurrency_block():
+    """Queue requests behind a shared gate until /concurrency/release is called."""
+    global waiting_requests
+    try:
+        delay = float(request.args.get("delay", 1.0))
+    except ValueError:
+        return jsonify({"error": "delay must be a number"}), 400
+
+    if delay < 0.0 or delay > 30.0:
+        return jsonify({"error": "delay must be between 0.0 and 30.0"}), 400
+
+    request_id = request.args.get("request_id")
+
+    async with concurrency_lock:
+        waiting_requests += 1
+        current_round = release_round
+        queued_at = waiting_requests
+
+    await concurrency_gate.wait()
+    await asyncio.sleep(delay)
+
+    async with concurrency_lock:
+        waiting_requests -= 1
+        remaining = waiting_requests
+
+    return jsonify(
+        {
+            "message": "Request released",
+            "round": current_round,
+            "slept_after_release": delay,
+            "request_id": request_id,
+            "queued_position": queued_at,
+            "currently_waiting": remaining,
+            "timestamp": time.time(),
+        }
+    )
+
+
+@app.route("/concurrency/release", methods=["POST"])
+async def concurrency_release():
+    """Release all blocked /concurrency/block requests and optionally re-arm gate."""
+    global release_round
+    reset_gate = _parse_bool_arg(request.args.get("reset_gate"), True)
+    try:
+        rearm_delay = float(request.args.get("rearm_delay", 0.0))
+    except ValueError:
+        return jsonify({"error": "rearm_delay must be a number"}), 400
+
+    if rearm_delay < 0.0 or rearm_delay > 5.0:
+        return jsonify({"error": "rearm_delay must be between 0.0 and 5.0"}), 400
+
+    async with concurrency_lock:
+        snapshot_waiting = waiting_requests
+        current_round = release_round
+        concurrency_gate.set()
+        released_at = time.time()
+
+    if reset_gate:
+        if rearm_delay:
+            await asyncio.sleep(rearm_delay)
+        concurrency_gate.clear()
+        async with concurrency_lock:
+            release_round += 1
+
+    return jsonify(
+        {
+            "message": "Released waiting requests",
+            "round": current_round,
+            "released_waiting": snapshot_waiting,
+            "gate_rearmed": reset_gate,
+            "rearm_delay": rearm_delay if reset_gate else 0.0,
+            "timestamp": released_at,
+        }
     )
 
 
@@ -141,6 +278,14 @@ async def health():
             "server": "hypercorn",
             "timestamp": time.time(),
             "fastapi_server": FASTAPI_BASE_URL,
+            "endpoints": [
+                "/slow-io",
+                "/slow-io-sync",
+                "/concurrency/block",
+                "/concurrency/release",
+                "/benchmark/quart-io-test",
+                "/health",
+            ],
         }
     )
 
@@ -151,6 +296,10 @@ def main():
     print("Starting Quart Comparison Server...")
     print("Server will run on http://localhost:8003")
     print("\nAvailable endpoints:")
+    print("  GET /slow-io?delay=1.0")
+    print("  GET /slow-io-sync?delay=1.0")
+    print("  GET /concurrency/block")
+    print("  POST /concurrency/release")
     print("  GET /benchmark/quart-io-test?delay=1.0&concurrent=5")
     print("  GET /health")
     print("\nNote: Make sure FastAPI server is running on port 8001")
@@ -162,6 +311,7 @@ def main():
 
     config = Config()
     config.bind = ["0.0.0.0:8003"]
+    config.backlog = 2048  # Allow many concurrent connections to queue
     asyncio.run(hypercorn.asyncio.serve(app, config))
 
 

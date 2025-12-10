@@ -4,6 +4,7 @@ This is a minimal Flask app to compare sync performance against Quart
 """
 
 import time
+import threading
 
 import requests
 from flask import Flask, jsonify, request
@@ -13,12 +14,136 @@ app = Flask(__name__)
 # Configuration
 FASTAPI_BASE_URL = "http://localhost:8001"
 
+# Shared gate for concurrency test (mirrors FastAPI endpoints)
+concurrency_gate = threading.Event()
+concurrency_gate.clear()
+concurrency_lock = threading.Lock()
+waiting_requests = 0
+release_round = 1
+
 
 @app.route("/")
 def root():
     """Health check"""
     return jsonify(
         {"status": "ok", "message": "Flask Comparison Server", "type": "sync"}
+    )
+
+
+def _parse_bool_arg(value: str | None, default: bool) -> bool:
+    if value is None:
+        return default
+    return value.lower() in {"1", "true", "t", "yes", "y", "on"}
+
+
+@app.route("/slow-io")
+def slow_io_endpoint():
+    """Simulates slow IO (blocking sleep) to mirror FastAPI endpoint"""
+    try:
+        delay = float(request.args.get("delay", 1.0))
+    except ValueError:
+        return jsonify({"error": "delay must be a number"}), 400
+
+    if delay < 0.1 or delay > 10.0:
+        return jsonify({"error": "delay must be between 0.1 and 10.0"}), 400
+
+    request_id = request.args.get("request_id")
+    time.sleep(delay)
+
+    return jsonify(
+        {
+            "message": f"IO operation completed after {delay} seconds",
+            "delay": delay,
+            "timestamp": time.time(),
+            "request_id": request_id,
+        }
+    )
+
+
+@app.route("/slow-io-sync")
+def slow_io_sync_endpoint():
+    """Alias of slow-io to match FastAPI's sync endpoint"""
+    return slow_io_endpoint()
+
+
+@app.route("/concurrency/block")
+def concurrency_block():
+    """
+    Queue requests behind a shared gate until /concurrency/release is called.
+    """
+    global waiting_requests
+    try:
+        delay = float(request.args.get("delay", 1.0))
+    except ValueError:
+        return jsonify({"error": "delay must be a number"}), 400
+
+    if delay < 0.0 or delay > 30.0:
+        return jsonify({"error": "delay must be between 0.0 and 30.0"}), 400
+
+    request_id = request.args.get("request_id")
+
+    with concurrency_lock:
+        waiting_requests += 1
+        current_round = release_round
+        queued_at = waiting_requests
+
+    concurrency_gate.wait()  # Blocks until release endpoint sets the gate
+    time.sleep(delay)
+
+    with concurrency_lock:
+        waiting_requests -= 1
+        remaining = waiting_requests
+
+    return jsonify(
+        {
+            "message": "Request released",
+            "round": current_round,
+            "slept_after_release": delay,
+            "request_id": request_id,
+            "queued_position": queued_at,
+            "currently_waiting": remaining,
+            "timestamp": time.time(),
+        }
+    )
+
+
+@app.route("/concurrency/release", methods=["POST"])
+def concurrency_release():
+    """
+    Release all blocked /concurrency/block requests. Optionally re-arm gate.
+    """
+    global release_round
+    reset_gate = _parse_bool_arg(request.args.get("reset_gate"), True)
+    try:
+        rearm_delay = float(request.args.get("rearm_delay", 0.0))
+    except ValueError:
+        return jsonify({"error": "rearm_delay must be a number"}), 400
+
+    if rearm_delay < 0.0 or rearm_delay > 5.0:
+        return jsonify({"error": "rearm_delay must be between 0.0 and 5.0"}), 400
+
+    with concurrency_lock:
+        snapshot_waiting = waiting_requests
+        current_round = release_round
+        concurrency_gate.set()
+        released_at = time.time()
+
+    if reset_gate:
+        if rearm_delay:
+            time.sleep(rearm_delay)
+        concurrency_gate.clear()
+        with concurrency_lock:
+            release_round += 1
+
+    return jsonify(
+        {
+            "message": "Released waiting requests",
+            "round": current_round,
+            "released_waiting": snapshot_waiting,
+            "gate_rearmed": reset_gate,
+            "rearm_delay": rearm_delay if reset_gate else 0.0,
+            "timestamp": released_at,
+        }
     )
 
 
@@ -110,6 +235,14 @@ def health():
             "type": "flask_sync",
             "timestamp": time.time(),
             "fastapi_server": FASTAPI_BASE_URL,
+            "endpoints": [
+                "/slow-io",
+                "/slow-io-sync",
+                "/concurrency/block",
+                "/concurrency/release",
+                "/benchmark/flask-io-test",
+                "/health",
+            ],
         }
     )
 

@@ -14,13 +14,15 @@ COPY servers/quart_comparison_server.py .
 EXPOSE 8003
 
 # Run with Hypercorn (production ASGI server)
-# - Workers: 4 (adjust based on CPU cores)
+# - Workers: 1 (single worker can handle many async connections)
 # - Uses asyncio for true async concurrency
+# - Backlog: 2048 (allows queuing of many concurrent connections)
 # - Can handle many more concurrent connections than Gunicorn
 CMD ["hypercorn", \
      "--bind", "0.0.0.0:8003", \
-     "--workers", "4", \
+     "--workers", "1", \
      "--worker-class", "asyncio", \
+     "--backlog", "2048", \
      "--access-logfile", "-", \
      "--error-logfile", "-", \
      "--log-level", "info", \
